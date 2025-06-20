@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 
 namespace CubeConstruction
 {
@@ -22,14 +23,21 @@ namespace CubeConstruction
         private Transform3DGroup _cubeGroupTransform;
         private readonly double _rotationSpeed = 0.5;
         private ModelVisual3D _boundingCubeVisual;
+        private DispatcherTimer statusTimer;
 
         public MainWindow()
         {
             InitializeComponent();
-
+            statusTimer = new DispatcherTimer();
+            statusTimer.Interval = TimeSpan.FromSeconds(2);
+            statusTimer.Tick += (s, e) =>
+            {
+                StatusText.Text = "";
+                statusTimer.Stop();
+            };
             if (drawingCanvas == null || viewComboBox == null)
             {
-                MessageBox.Show("Error: drawingCanvas or viewComboBox is null after InitializeComponent.");
+                MessageBox.Show("ОШИБКА");
                 return;
             }
 
@@ -127,9 +135,10 @@ namespace CubeConstruction
             }
         }
 
-        private GeometryModel3D CreateCube(double x, double y, double z)
+        private Model3DGroup CreateCube(double x, double y, double z)
         {
-            MeshGeometry3D mesh = new MeshGeometry3D();
+            // Create the main cube mesh for faces
+            MeshGeometry3D cubeMesh = new MeshGeometry3D();
             Point3DCollection points = new Point3DCollection
             {
                 new Point3D(x, y, z),
@@ -150,17 +159,124 @@ namespace CubeConstruction
                 3, 2, 6, 3, 6, 7,
                 0, 4, 5, 0, 5, 1
             };
-            mesh.Positions = points;
-            mesh.TriangleIndices = indices;
+            cubeMesh.Positions = points;
+            cubeMesh.TriangleIndices = indices;
 
+            // Create the main cube with random color faces
             Color cubeColor = Color.FromRgb((byte)_random.Next(256), (byte)_random.Next(256), (byte)_random.Next(256));
-            GeometryModel3D cube = new GeometryModel3D
+            GeometryModel3D cubeModel = new GeometryModel3D
             {
-                Geometry = mesh,
+                Geometry = cubeMesh,
                 Material = new DiffuseMaterial(new SolidColorBrush(cubeColor)),
                 BackMaterial = new DiffuseMaterial(new SolidColorBrush(cubeColor))
             };
-            return cube;
+
+            // Create the wireframe for black edges
+            GeometryModel3D wireframeModel = CreateCubeWireframe(x, y, z);
+
+            // Create a Model3DGroup to hold both the cube and wireframe
+            Model3DGroup cubeGroup = new Model3DGroup();
+            cubeGroup.Children.Add(wireframeModel); // Black edges first (behind)
+            cubeGroup.Children.Add(cubeModel);      // Main cube faces on top
+
+            return cubeGroup;
+        }
+        private GeometryModel3D CreateCubeWireframe(double x, double y, double z)
+        {
+            MeshGeometry3D wireframeMesh = new MeshGeometry3D();
+            double thickness = 0.015; // Thickness of the wireframe edges
+
+            // Define the 8 vertices of the cube to match CreateCube's geometry
+            Point3D[] vertices = new Point3D[]
+            {
+        new Point3D(x, y, z),           // Vertex 0
+        new Point3D(x + 1, y, z),       // Vertex 1
+        new Point3D(x + 1, y + 1, z),   // Vertex 2
+        new Point3D(x, y + 1, z),       // Vertex 3
+        new Point3D(x, y, z + 1),       // Vertex 4
+        new Point3D(x + 1, y, z + 1),   // Vertex 5
+        new Point3D(x + 1, y + 1, z + 1), // Vertex 6
+        new Point3D(x, y + 1, z + 1)    // Vertex 7
+            };
+
+            // Define the 12 edges of the cube by connecting vertices
+            int[][] edges = new int[][]
+            {
+        new[] { 0, 1 }, // Bottom front
+        new[] { 1, 2 }, // Bottom right
+        new[] { 2, 3 }, // Bottom back
+        new[] { 3, 0 }, // Bottom left
+        new[] { 4, 5 }, // Top front
+        new[] { 5, 6 }, // Top right
+        new[] { 6, 7 }, // Top back
+        new[] { 7, 4 }, // Top left
+        new[] { 0, 4 }, // Front left vertical
+        new[] { 1, 5 }, // Front right vertical
+        new[] { 2, 6 }, // Back right vertical
+        new[] { 3, 7 }  // Back left vertical
+            };
+
+            Point3DCollection positions = new Point3DCollection();
+            Int32Collection indices = new Int32Collection();
+
+            // For each edge, create a thin rectangular prism (approximating a line)
+            for (int i = 0; i < edges.Length; i++)
+            {
+                Point3D start = vertices[edges[i][0]];
+                Point3D end = vertices[edges[i][1]];
+                Vector3D dir = end - start;
+                double length = dir.Length;
+                dir.Normalize();
+
+                // Define a small cross-section perpendicular to the edge direction
+                Vector3D up = Math.Abs(dir.Y) < 0.9 ? new Vector3D(0, 1, 0) : new Vector3D(0, 0, 1);
+                Vector3D right = Vector3D.CrossProduct(dir, up);
+                right.Normalize();
+                up = Vector3D.CrossProduct(right, dir);
+                up.Normalize();
+
+                // Create 4 vertices for the cross-section at start and end
+                Point3D[] crossSectionStart = new Point3D[4];
+                Point3D[] crossSectionEnd = new Point3D[4];
+                for (int j = 0; j < 4; j++)
+                {
+                    double angle = j * Math.PI / 2;
+                    Vector3D offset = (Math.Cos(angle) * right + Math.Sin(angle) * up) * thickness;
+                    crossSectionStart[j] = start + offset;
+                    crossSectionEnd[j] = end + offset;
+                }
+
+                // Add vertices to positions
+                int baseIndex = positions.Count;
+                foreach (var p in crossSectionStart) positions.Add(p);
+                foreach (var p in crossSectionEnd) positions.Add(p);
+
+                // Define triangles for the prism (4 sides, each with 2 triangles)
+                int[] sideIndices = new int[]
+                {
+            0, 1, 5, 0, 5, 4, // Side 1
+            1, 2, 6, 1, 6, 5, // Side 2
+            2, 3, 7, 2, 7, 6, // Side 3
+            3, 0, 4, 3, 4, 7  // Side 4
+                };
+                foreach (int idx in sideIndices)
+                {
+                    indices.Add(baseIndex + idx);
+                }
+            }
+
+            wireframeMesh.Positions = positions;
+            wireframeMesh.TriangleIndices = indices;
+
+            // Create black material for the wireframe
+            GeometryModel3D wireframeModel = new GeometryModel3D
+            {
+                Geometry = wireframeMesh,
+                Material = new DiffuseMaterial(new SolidColorBrush(Color.FromRgb(0, 0, 0))),
+                BackMaterial = new DiffuseMaterial(new SolidColorBrush(Color.FromRgb(0, 0, 0)))
+            };
+
+            return wireframeModel;
         }
 
         private void AddDirectionArrows()
@@ -269,7 +385,7 @@ namespace CubeConstruction
             mesh.Positions = positions;
             mesh.TriangleIndices = indices;
 
-            DiffuseMaterial material = new DiffuseMaterial(new SolidColorBrush(Color.FromArgb(50, 0, 255, 0)));
+            DiffuseMaterial material = new DiffuseMaterial(new SolidColorBrush(Color.FromArgb(50, 255, 255, 255)));
 
             GeometryModel3D cubeModel = new GeometryModel3D
             {
@@ -462,7 +578,7 @@ namespace CubeConstruction
                 };
                 Canvas.SetLeft(label, i * 20 + 5);
                 Canvas.SetTop(label, 0);
-                drawingCanvas.Children.Add(label);
+                //drawingCanvas.Children.Add(label);
             }
             TextBlock xAxis = new TextBlock
             {
@@ -473,7 +589,7 @@ namespace CubeConstruction
             };
             Canvas.SetLeft(xAxis, 200);
             Canvas.SetTop(xAxis, 0);
-            drawingCanvas.Children.Add(xAxis);
+           // drawingCanvas.Children.Add(xAxis);
 
             for (int i = 0; i < 10; i++)
             {
@@ -488,7 +604,7 @@ namespace CubeConstruction
                 };
                 Canvas.SetLeft(label, 0);
                 Canvas.SetTop(label, i * 20 + 5);
-                drawingCanvas.Children.Add(label);
+              //  drawingCanvas.Children.Add(label);
             }
             TextBlock yAxis = new TextBlock
             {
@@ -499,7 +615,7 @@ namespace CubeConstruction
             };
             Canvas.SetLeft(yAxis, 0);
             Canvas.SetTop(yAxis, 200);
-            drawingCanvas.Children.Add(yAxis);
+           // drawingCanvas.Children.Add(yAxis);
         }
 
         private void ViewComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -510,14 +626,14 @@ namespace CubeConstruction
         private void VerifyDrawing_Click(object sender, RoutedEventArgs e)
         {
             if (drawingCanvas == null || viewComboBox == null) return;
-
+          //  ComboBoxItem selectedView = viewComboBox.SelectedItem();
             string selectedView = (viewComboBox.SelectedItem as ComboBoxItem)?.Content.ToString();
             bool isCorrect = false;
 
             HashSet<Point> expectedPattern = new HashSet<Point>();
             double minX = 0, minZ = 0, minY = 0;
 
-            if (selectedView == "Top View")
+            if (selectedView == "Вид сверху")
             {
                 var groupedByXZ = _cubePositions.GroupBy(p => new { p.X, p.Z })
                     .Select(g => g.OrderByDescending(p => p.Y).First());
@@ -526,11 +642,11 @@ namespace CubeConstruction
                 foreach (var pos in groupedByXZ)
                 {
                     int relativeX = (int)(pos.X - minX);
-                    int relativeY = (int)(pos.Z - minZ);
-                    expectedPattern.Add(new Point(relativeX, relativeY));
+                    int relativeZ = (int)(pos.Z - minZ); // Z maps to Y on the grid for Top View
+                    expectedPattern.Add(new Point(relativeX, relativeZ));
                 }
             }
-            else if (selectedView == "Left View")
+            else if (selectedView == "Вид слева")
             {
                 var groupedByYZ = _cubePositions.GroupBy(p => new { p.Y, p.Z })
                     .Select(g => g.OrderByDescending(p => p.X).First());
@@ -540,10 +656,10 @@ namespace CubeConstruction
                 {
                     int relativeX = (int)(pos.Z - minZ);
                     int relativeY = (int)(maxY(groupedByYZ) - (pos.Y - minY));
-                    expectedPattern.Add(new Point(relativeX, relativeY));
+                    expectedPattern.Add(new Point( relativeX, relativeY));
                 }
             }
-            else if (selectedView == "Front View")
+            else if (selectedView == "Вид спереди" )
             {
                 var groupedByXY = _cubePositions.GroupBy(p => new { p.X, p.Y })
                     .Select(g => g.OrderByDescending(p => p.Z).First());
@@ -559,7 +675,8 @@ namespace CubeConstruction
 
             if (_drawnSquares.Count == 0)
             {
-                MessageBox.Show("Please draw some squares on the grid.");
+                ShowStatus("Нарисуйте что нибудь в области!!");
+              
                 return;
             }
 
@@ -577,18 +694,45 @@ namespace CubeConstruction
                        expectedPattern.All(p => drawnPattern.Contains(p)) &&
                        drawnPattern.All(p => expectedPattern.Contains(p));
 
-            string expectedDebug = "Expected Pattern: " + string.Join(", ", expectedPattern.Select(p => $"({p.X},{p.Y})"));
-            string drawnDebug = "Drawn Pattern: " + string.Join(", ", drawnPattern.Select(p => $"({p.X},{p.Y})"));
-            string debugMessage = $"{expectedDebug}\n{drawnDebug}";
-          //  MessageBox.Show(debugMessage);
-
-            MessageBox.Show(isCorrect ? "Correct! Your drawing matches the selected view." : "Incorrect. Your drawing does not match the selected view.");
+            //string expectedDebug = "Expected Pattern: " + string.Join(", ", expectedPattern.Select(p => $"({p.X},{p.Y})"));
+            // string drawnDebug = "Drawn Pattern: " + string.Join(", ", drawnPattern.Select(p => $"({p.X},{p.Y})"));
+            //  string debugMessage = $"{expectedDebug}\n{drawnDebug}";
+            // MessageBox.Show(debugMessage);
+            ShowStatus(isCorrect ? "Верно" : "Неверно");
         }
 
         private double maxY(IEnumerable<Point3D> points)
         {
             double minY = points.Min(p => p.Y);
             return points.Max(p => p.Y - minY);
+        }
+
+        private void ShowStatus(string message)
+        {
+            StatusText.Text = message;
+            StatusText.Visibility = Visibility.Visible;
+            statusTimer.Stop(); // сбрасываем, если таймер уже бежит
+            statusTimer.Start(); // запускаем заново
+        }
+
+        private void RestartButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (drawingCanvas == null) return;
+
+            drawingCanvas.Children.Clear();
+            _drawnSquares.Clear();
+            DrawGridAndLabels();
+
+            GenerateCubes();
+            AddDirectionArrows();
+            _boundingCubeVisual = CreateBoundingCube();
+            viewport.Children.Add(_boundingCubeVisual);
+            AdjustCameraToFit();
+        }
+
+        private void Exit_Click(object sender, RoutedEventArgs e)
+        {
+            Close();
         }
     }
 }
