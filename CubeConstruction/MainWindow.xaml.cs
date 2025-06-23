@@ -18,12 +18,13 @@ namespace CubeConstruction
         private int _cubeCount;
         private List<Point> _drawnSquares = new List<Point>();
         private List<Point3D> _cubePositions = new List<Point3D>();
-        private RotateTransform3D _rotationX;
-        private RotateTransform3D _rotationY;
-        private Transform3DGroup _cubeGroupTransform;
-        private readonly double _rotationSpeed = 0.5;
         private ModelVisual3D _boundingCubeVisual;
         private DispatcherTimer statusTimer;
+        private double theta = Math.PI / 2; // Azimuth (horizontal angle)
+        private double phi = Math.PI / 3;   // Elevation (vertical angle)
+        private readonly double radius = 10; // Distance from camera to origin
+        private readonly double rotationSpeed = 0.005; // Adjusted for smoother camera rotation
+       // private PerspectiveCamera camera; // Reference to the viewport camera
 
         public MainWindow()
         {
@@ -41,13 +42,16 @@ namespace CubeConstruction
                 return;
             }
 
-            // Initialize rotation transforms
-            _cubeGroupTransform = new Transform3DGroup();
-            _rotationX = new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(1, 0, 0), 0));
-            _rotationY = new RotateTransform3D(new AxisAngleRotation3D(new Vector3D(0, 1, 0), 0));
-            _cubeGroupTransform.Children.Add(_rotationX);
-            _cubeGroupTransform.Children.Add(_rotationY);
-            cubeGroup.Transform = _cubeGroupTransform;
+            // Initialize camera
+            camera = new PerspectiveCamera
+            {
+                Position = new Point3D(0, 0, radius),
+                LookDirection = new Vector3D(0, 0, -radius),
+                UpDirection = new Vector3D(0, 1, 0),
+                FieldOfView = 60
+            };
+            viewport.Camera = camera;
+            UpdateCameraPosition();
 
             // Setup lighting
             SetupLighting();
@@ -57,7 +61,6 @@ namespace CubeConstruction
             AddDirectionArrows();
             _boundingCubeVisual = CreateBoundingCube();
             viewport.Children.Add(_boundingCubeVisual);
-            AdjustCameraToFit();
 
             // Attach canvas event handlers
             drawingCanvas.MouseLeftButtonDown += DrawingCanvas_MouseLeftButtonDown;
@@ -67,7 +70,19 @@ namespace CubeConstruction
             // Draw grid and labels
             DrawGridAndLabels();
         }
+        private void UpdateCameraPosition()
+        {
+            // Clamp phi to avoid flipping at the poles
+            phi = Math.Max(0.1, Math.Min(Math.PI - 0.1, phi));
 
+            // Convert spherical coordinates to Cartesian coordinates
+            double x = -radius * Math.Sin(phi) * Math.Cos(theta);
+            double y = radius * Math.Cos(phi);
+            double z = radius * Math.Sin(phi) * Math.Sin(theta);
+
+            camera.Position = new Point3D(x, y, z);
+            camera.LookDirection = new Vector3D(-x, -y, -z);
+        }
         private void SetupLighting()
         {
             Model3DGroup lightGroup = new Model3DGroup();
@@ -358,33 +373,42 @@ namespace CubeConstruction
         private ModelVisual3D CreateBoundingCube()
         {
             MeshGeometry3D mesh = new MeshGeometry3D();
-            double size = 50.0;
+            double size = 50.0; // Keep the large size from Code 2
 
+            // Define the 8 vertices of the bounding cube
             Point3DCollection positions = new Point3DCollection
-            {
-                new Point3D(-size, -size, -size),
-                new Point3D(size, -size, -size),
-                new Point3D(size, size, -size),
-                new Point3D(-size, size, -size),
-                new Point3D(-size, -size, size),
-                new Point3D(size, -size, size),
-                new Point3D(size, size, size),
-                new Point3D(-size, size, size)
-            };
+    {
+        new Point3D(-size, -size, -size),
+        new Point3D(size, -size, -size),
+        new Point3D(size, size, -size),
+        new Point3D(-size, size, -size),
+        new Point3D(-size, -size, size),
+        new Point3D(size, -size, size),
+        new Point3D(size, size, size),
+        new Point3D(-size, size, size)
+    };
 
+            // Define the triangles (two per face, 6 faces)
             Int32Collection indices = new Int32Collection
-            {
-                0, 1, 2, 0, 2, 3,
-                5, 4, 7, 5, 7, 6,
-                4, 0, 3, 4, 3, 7,
-                1, 5, 6, 1, 6, 2,
-                3, 2, 6, 3, 6, 7,
-                4, 5, 1, 4, 1, 0
-            };
+    {
+        // Front
+        0, 1, 2, 0, 2, 3,
+        // Back
+        5, 4, 7, 5, 7, 6,
+        // Left
+        4, 0, 3, 4, 3, 7,
+        // Right
+        1, 5, 6, 1, 6, 2,
+        // Top
+        3, 2, 6, 3, 6, 7,
+        // Bottom
+        4, 5, 1, 4, 1, 0
+    };
 
             mesh.Positions = positions;
             mesh.TriangleIndices = indices;
 
+            // Create a semi-transparent material
             DiffuseMaterial material = new DiffuseMaterial(new SolidColorBrush(Color.FromArgb(50, 255, 255, 255)));
 
             GeometryModel3D cubeModel = new GeometryModel3D
@@ -399,47 +423,26 @@ namespace CubeConstruction
                 Content = cubeModel
             };
 
+            // Attach mouse events for camera rotation
             viewport.MouseLeftButtonDown += (s, e) =>
             {
-                if (IsMouseOverBoundingCube(e.GetPosition(viewport)))
-                {
-                    _lastMousePosition = e.GetPosition(viewport);
-                    e.Handled = true;
-                }
+                _lastMousePosition = e.GetPosition(viewport);
+                e.Handled = true;
             };
 
             viewport.MouseMove += (s, e) =>
             {
-                if (e.LeftButton == MouseButtonState.Pressed && IsMouseOverBoundingCube(e.GetPosition(viewport)))
+                if (e.LeftButton == MouseButtonState.Pressed)
                 {
                     Point currentPosition = e.GetPosition(viewport);
                     double deltaX = currentPosition.X - _lastMousePosition.X;
                     double deltaY = currentPosition.Y - _lastMousePosition.Y;
 
-                    // Get camera's up direction for horizontal rotation
-                    Vector3D upAxis = camera.UpDirection;
-                    upAxis.Normalize();
+                    // Update angles for horizontal (theta) and vertical (phi) rotation
+                    theta -= deltaX * rotationSpeed;
+                    phi -= deltaY * rotationSpeed;
 
-                    // Get vertical axis (perpendicular to LookDirection and UpDirection)
-                    Vector3D lookDirection = camera.LookDirection;
-                    lookDirection.Normalize();
-                    Vector3D horizontalAxis = Vector3D.CrossProduct(lookDirection, upAxis);
-                    horizontalAxis.Normalize();
-
-                    // Update rotations with camera-relative axes, clamping to [-90, 90] degrees
-                    if (_rotationX.Rotation is AxisAngleRotation3D rotX)
-                    {
-                        rotX.Axis = upAxis; // Horizontal rotation
-                        double newXAngle = rotX.Angle + deltaX * _rotationSpeed;
-                        rotX.Angle = Math.Max(-60, Math.Min(120, newXAngle)); // Clamp to [-90, 90]
-                    }
-                    if (_rotationY.Rotation is AxisAngleRotation3D rotY)
-                    {
-                        rotY.Axis = horizontalAxis; // Vertical rotation
-                        double newYAngle = rotY.Angle - deltaY * _rotationSpeed;
-                        rotY.Angle = Math.Max(-60, Math.Min(120, newYAngle)); // Clamp to [-90, 90]
-                    }
-
+                    UpdateCameraPosition();
                     _lastMousePosition = currentPosition;
                     e.Handled = true;
                 }
@@ -450,13 +453,15 @@ namespace CubeConstruction
 
         private bool IsMouseOverBoundingCube(Point mousePosition)
         {
-            RayMeshGeometry3DHitTestResult hitResult = VisualTreeHelper.HitTest(viewport, mousePosition) as RayMeshGeometry3DHitTestResult;
-            if (hitResult != null && hitResult.ModelHit == _boundingCubeVisual.Content)
+            // Perform a hit test to check if the mouse is over the bounding cube
+            HitTestResult result = VisualTreeHelper.HitTest(viewport, mousePosition);
+            if (result != null && result.VisualHit is ModelVisual3D visual && visual == _boundingCubeVisual)
             {
                 return true;
             }
             return false;
         }
+
 
         private void DrawingCanvas_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
@@ -675,7 +680,7 @@ namespace CubeConstruction
 
             if (_drawnSquares.Count == 0)
             {
-                ShowStatus("Нарисуйте что нибудь в области!!");
+                ShowStatus("Нарисуйте что нибудь в области!");
               
                 return;
             }
@@ -725,9 +730,10 @@ namespace CubeConstruction
 
             GenerateCubes();
             AddDirectionArrows();
-            _boundingCubeVisual = CreateBoundingCube();
-            viewport.Children.Add(_boundingCubeVisual);
-            AdjustCameraToFit();
+            // Reset camera to initial position
+            theta = Math.PI / 2;
+            phi = Math.PI / 2;
+            UpdateCameraPosition();
         }
 
         private void Exit_Click(object sender, RoutedEventArgs e)

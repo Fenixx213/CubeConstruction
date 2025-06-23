@@ -1,7 +1,7 @@
 ﻿<Window x:Class="CubeConstruction.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Cube Construction Viewer" Height="720" Width="1280">
+        Title="Рисование проекций" Height="720" Width="1280" Background="AliceBlue">
     
     <Grid Margin="10">
         <Grid.RowDefinitions>
@@ -26,15 +26,18 @@
         </Viewport3D>
 
         <StackPanel  Grid.Column="1" Margin="10,0,10,0">
-            <TextBlock Text="ПОДСЧЕТ КУБОВ" FontSize="48" TextWrapping="Wrap"  FontWeight="Bold" Foreground="#1f3c88"/>
-            <Border Background="White" Padding="10" CornerRadius="10" BorderBrush="#ccc" BorderThickness="1">
+            <TextBlock Text="РИСОВАНИЕ ПРОЕКЦИЙ" FontSize="42" TextWrapping="Wrap"  FontWeight="Bold" Foreground="#1f3c88"/>
+            <Border Background="White" Padding="10" CornerRadius="10" BorderBrush="#1f3c88" BorderThickness="1">
                 <TextBlock FontSize="20" Foreground="Black" TextAlignment="Center" TextWrapping="Wrap"> 
-Нарисуйте один из трех видов. На левую клавишу мыши можно нарисовать кубик, при нажатии на правую клавишу мыши можно стереть кубик.    
-         
+Нарисуй одну из трех проекций конструкции.
+                    Ниже выбери вид, который хочешь нарисовать.
+                    Щелкни левой кнопкой мыши по клетке, чтобы закрасить ее. Щелкни еще раз, чтобы убрать окрашивание.
+                    Зажми правую кнопку мыши, чтобы вращать конструкцию.
+
                 </TextBlock>
            
             </Border>
-            <Border Background="White" Padding="10" CornerRadius="10" BorderBrush="#ccc" BorderThickness="1">
+            <Border Background="White" Margin="0,5,0,0" Padding="10" CornerRadius="10" BorderBrush="#ccc" BorderThickness="1">
                 <TextBlock FontSize="20" Foreground="Black" TextAlignment="Center" TextWrapping="Wrap"> 
                         Синяя стрелка - вид спереди, красная стрелка - вид слева, зеленая стрелка - вид сверху.
                 </TextBlock>
